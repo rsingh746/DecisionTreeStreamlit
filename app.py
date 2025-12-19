@@ -10,6 +10,9 @@ st.set_page_config(
 
 st.title("Decision Trees: Geometry and Failure Modes")
 
+# -------------------------------------------------------------------
+# Cached data utilities
+# -------------------------------------------------------------------
 
 @st.cache_data
 def generate_staircase_data(n_points=300):
@@ -19,10 +22,15 @@ def generate_staircase_data(n_points=300):
 
 
 @st.cache_data
-def generate_xor_data(n=300, seed=0):
+def generate_xor_data(n=300, noise=0.0, seed=0):
     rng = np.random.RandomState(seed)
     X = rng.rand(n, 2)
     y = ((X[:, 0] > 0.5) ^ (X[:, 1] > 0.5)).astype(int)
+
+    if noise > 0:
+        flip_mask = rng.rand(n) < noise
+        y[flip_mask] = 1 - y[flip_mask]
+
     return X, y
 
 
@@ -50,6 +58,10 @@ def train_classification_tree(X, y, depth):
     return model
 
 
+# -------------------------------------------------------------------
+# Sidebar
+# -------------------------------------------------------------------
+
 experiment = st.sidebar.selectbox(
     "Experiment",
     ["Staircase Effect", "XOR Blindspot"]
@@ -58,19 +70,49 @@ experiment = st.sidebar.selectbox(
 max_depth = st.sidebar.slider("Tree depth", 1, 10, 3)
 noise = st.sidebar.slider("Noise level", 0.0, 0.5, 0.0, step=0.05)
 
+# -------------------------------------------------------------------
+# Staircase Effect (Regression)
+# -------------------------------------------------------------------
+
 if experiment == "Staircase Effect":
 
     st.header("Staircase Effect in Regression Trees")
 
     X, y_true = generate_staircase_data()
-    y = y_true + noise * np.random.randn(len(y_true))
+    rng = np.random.RandomState(0)
+    y_obs = y_true + noise * rng.randn(len(y_true))
 
-    model = train_regression_tree(X, y, max_depth)
+    model = train_regression_tree(X, y_obs, max_depth)
     y_pred = model.predict(X)
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(X, y_true, linewidth=2, label="True function")
-    ax.step(X.ravel(), y_pred, where="post", linewidth=2, label="Tree prediction")
+
+    ax.plot(
+        X,
+        y_true,
+        linewidth=2,
+        label="True function",
+        zorder=3
+    )
+
+    ax.scatter(
+        X,
+        y_obs,
+        s=12,
+        alpha=0.4,
+        label="Noisy observations",
+        zorder=2
+    )
+
+    ax.step(
+        X.ravel(),
+        y_pred,
+        where="post",
+        linewidth=2,
+        label="Tree prediction",
+        zorder=4
+    )
+
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title("Piecewise Constant Approximation")
@@ -80,35 +122,60 @@ if experiment == "Staircase Effect":
     st.pyplot(fig, clear_figure=True)
 
     st.markdown(
-        "Increasing depth creates finer steps, but the prediction never becomes smooth. "
-        "Decision trees approximate functions using flat regions separated by jumps."
+        "Noise does not change the underlying function. "
+        "It changes the observations the model sees. "
+        "As depth increases, the tree becomes capable of fitting these fluctuations."
     )
+
+# -------------------------------------------------------------------
+# XOR Blindspot (Classification)
+# -------------------------------------------------------------------
 
 else:
 
     st.header("XOR Blindspot in Classification Trees")
 
-    X, y = generate_xor_data()
+    X, y = generate_xor_data(noise=noise)
     xx, yy, grid = generate_mesh()
 
     model = train_classification_tree(X, y, max_depth)
     Z = model.predict(grid).reshape(xx.shape)
 
     fig, ax = plt.subplots(figsize=(5, 5))
+
     ax.contourf(xx, yy, Z, alpha=0.3)
-    ax.scatter(X[:, 0], X[:, 1], c=y, edgecolor="k", alpha=0.8)
+
+    ax.scatter(
+        X[y == 0, 0],
+        X[y == 0, 1],
+        alpha=0.8,
+        label="Class 0",
+        edgecolor="k"
+    )
+
+    ax.scatter(
+        X[y == 1, 0],
+        X[y == 1, 1],
+        alpha=0.8,
+        label="Class 1",
+        edgecolor="k"
+    )
+
     ax.set_xlabel("$x_1$")
     ax.set_ylabel("$x_2$")
-    ax.set_title(f"Decision boundary (depth = {max_depth})")
+    ax.set_title(f"Decision Boundary (depth = {max_depth})")
+    ax.legend()
 
     st.pyplot(fig, clear_figure=True)
 
-    if max_depth == 1:
+    if noise > 0:
         st.markdown(
-            "At depth 1, no split reduces impurity. "
-            "Each feature looks uninformative on its own."
+            "Label noise introduces contradictions in the data. "
+            "With sufficient depth, the tree responds by carving small regions "
+            "around mislabeled points."
         )
     else:
         st.markdown(
-            "With sufficient depth, the tree combines splits and recovers the interaction."
+            "With clean labels, increasing depth allows the tree to recover "
+            "the XOR interaction by stacking greedy splits."
         )
